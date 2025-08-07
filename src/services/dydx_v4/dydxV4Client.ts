@@ -77,96 +77,65 @@ export class DydxV4Client extends AbstractDexClient {
 		return orderParams;
 	}
 
-	async placeOrder(alertMessage: AlertObject) {
-	const orderParams = await this.buildOrderParams(alertMessage);
-	const { client, subaccount } = await this.buildCompositeClient();
+	async placeOrder(alertMessage: AlertMessage): Promise<void> {
+  const market = alertMessage.market.replace('-', '_'); // ETH-USD → ETH_USD
+  const orderSide = alertMessage.order.toUpperCase(); // BUY or SELL
+  const orderSize = alertMessage.size;
+  const price = alertMessage.price;
 
-	const market = orderParams.market;
-	const type = OrderType.MARKET;
-	const side = orderParams.side;
-	const timeInForce = OrderTimeInForce.GTT;
-	const execution = OrderExecution.DEFAULT;
-	const slippagePercentage = 0.05;
-	const price = side === OrderSide.BUY
-		? orderParams.price * (1 + slippagePercentage)
-		: orderParams.price * (1 - slippagePercentage);
-	const size = orderParams.size;
+  console.log('orderParams for dydx', {
+    market,
+    side: orderSide,
+    size: orderSize,
+    price: price
+  });
 
-	try {
-		const clientId = this.generateRandomInt32();
-		console.log('Client ID: ', clientId);
+  // 🟢 1. Ordre principal (ex: market BUY)
+  const orderParams: dydxV4OrderParams = {
+    market,
+    side: orderSide,
+    size: Number(orderSize),
+    price: Number(price),
+    type: 'MARKET' // ou 'LIMIT' si tu veux le rendre configurable
+  };
 
-		const tx = await client.placeOrder(
-			subaccount,
-			market,
-			type,
-			side,
-			price,
-			size,
-			clientId,
-			timeInForce,
-			120000,
-			execution,
-			false,
-			false,
-			null
-		);
+  await this.client.placeOrder(orderParams);
 
-		console.log('Transaction Result: ', tx);
-		await _sleep(60000); // 1 minute d'attente pour le fill
+  // 🟢 2. Optionnel : Take Profit / Stop Loss
+  const tp = alertMessage.tp;
+  const sl = alertMessage.sl;
 
-		const orderResult: OrderResult = {
-			side: orderParams.side,
-			size: orderParams.size,
-			orderId: String(clientId),
-		};
+  const oppositeSide = orderSide === 'BUY' ? 'SELL' : 'BUY';
 
-		// ✅ Ajout TP
-		if (alertMessage.tp) {
-			await client.placeOrder(
-				subaccount,
-				market,
-				OrderType.TAKE_PROFIT_MARKET,
-				side === OrderSide.BUY ? OrderSide.SELL : OrderSide.BUY,
-				alertMessage.tp,
-				size,
-				this.generateRandomInt32(),
-				OrderTimeInForce.GTT,
-				120000,
-				OrderExecution.DEFAULT,
-				false,
-				true, // reduce only
-				alertMessage.tp // trigger price
-			);
-			console.log(`TP placé à ${alertMessage.tp}`);
-		}
+  // Place TP
+  if (tp) {
+    const tpOrder: dydxV4OrderParams = {
+      market,
+      side: oppositeSide,
+      size: Number(orderSize),
+      triggerPrice: Number(tp),
+      type: 'TAKE_PROFIT_MARKET',
+      reduceOnly: true
+    };
+    console.log('Placing TP:', tpOrder);
+    await this.client.placeOrder(tpOrder);
+  }
 
-		// ✅ Ajout SL
-		if (alertMessage.sl) {
-			await client.placeOrder(
-				subaccount,
-				market,
-				OrderType.STOP_MARKET,
-				side === OrderSide.BUY ? OrderSide.SELL : OrderSide.BUY,
-				alertMessage.sl,
-				size,
-				this.generateRandomInt32(),
-				OrderTimeInForce.GTT,
-				120000,
-				OrderExecution.DEFAULT,
-				false,
-				true, // reduce only
-				alertMessage.sl // trigger price
-			);
-			console.log(`SL placé à ${alertMessage.sl}`);
-		}
-
-		return orderResult;
-	} catch (error) {
-		console.error(error);
-		throw new Error('Failed to place order with TP/SL');
-	}
+  // Place SL
+  if (sl) {
+    const slOrder: dydxV4OrderParams = {
+      market,
+      side: oppositeSide,
+      size: Number(orderSize),
+      triggerPrice: Number(sl),
+      type: 'STOP_MARKET',
+      reduceOnly: true
+    };
+    console.log('Placing SL:', slOrder);
+    await this.client.placeOrder(slOrder);
+  }
 }
+
 
 
 	private buildCompositeClient = async () => {
