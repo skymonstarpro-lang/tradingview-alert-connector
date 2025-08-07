@@ -78,77 +78,96 @@ export class DydxV4Client extends AbstractDexClient {
 	}
 
 	async placeOrder(alertMessage: AlertObject) {
-		const orderParams = await this.buildOrderParams(alertMessage);
-		const { client, subaccount } = await this.buildCompositeClient();
+	const orderParams = await this.buildOrderParams(alertMessage);
+	const { client, subaccount } = await this.buildCompositeClient();
 
-		const market = orderParams.market;
-		const type = OrderType.MARKET;
-		const side = orderParams.side;
-		const timeInForce = OrderTimeInForce.GTT;
-		const execution = OrderExecution.DEFAULT;
-		const slippagePercentage = 0.05;
-		const price =
-			side == OrderSide.BUY
-				? orderParams.price * (1 + slippagePercentage)
-				: orderParams.price * (1 - slippagePercentage);
-		const size = orderParams.size;
-		const postOnly = false;
-		const reduceOnly = false;
-		const triggerPrice = null;
-		let count = 0;
-		const maxTries = 3;
-		const fillWaitTime = 60000; // 1 minute
-		while (count <= maxTries) {
-			try {
-				const clientId = this.generateRandomInt32();
-				console.log('Client ID: ', clientId);
+	const market = orderParams.market;
+	const type = OrderType.MARKET;
+	const side = orderParams.side;
+	const timeInForce = OrderTimeInForce.GTT;
+	const execution = OrderExecution.DEFAULT;
+	const slippagePercentage = 0.05;
+	const price = side === OrderSide.BUY
+		? orderParams.price * (1 + slippagePercentage)
+		: orderParams.price * (1 - slippagePercentage);
+	const size = orderParams.size;
 
-				const tx = await client.placeOrder(
-					subaccount,
-					market,
-					type,
-					side,
-					price,
-					size,
-					clientId,
-					timeInForce,
-					120000, // 2 minute
-					execution,
-					postOnly,
-					reduceOnly,
-					triggerPrice
-				);
-				console.log('Transaction Result: ', tx);
-				await _sleep(fillWaitTime);
+	try {
+		const clientId = this.generateRandomInt32();
+		console.log('Client ID: ', clientId);
 
-				const isFilled = await this.isOrderFilled(String(clientId));
-				if (!isFilled)
-					throw new Error(
-						'Order is not found/filled. Retry again, count: ' + count
-					);
-				const orderResult: OrderResult = {
-					side: orderParams.side,
-					size: orderParams.size,
-					orderId: String(clientId)
-				};
-				await this.exportOrder(
-					'DydxV4',
-					alertMessage.strategy,
-					orderResult,
-					alertMessage.price,
-					alertMessage.market
-				);
+		const tx = await client.placeOrder(
+			subaccount,
+			market,
+			type,
+			side,
+			price,
+			size,
+			clientId,
+			timeInForce,
+			120000,
+			execution,
+			false,
+			false,
+			null
+		);
 
-				return orderResult;
-			} catch (error) {
-				console.error(error);
-				console.log('Retry again, count: ' + count);
-				count++;
+		console.log('Transaction Result: ', tx);
+		await _sleep(60000); // 1 minute d'attente pour le fill
 
-				await _sleep(5000);
-			}
+		const orderResult: OrderResult = {
+			side: orderParams.side,
+			size: orderParams.size,
+			orderId: String(clientId),
+		};
+
+		// ✅ Ajout TP
+		if (alertMessage.tp) {
+			await client.placeOrder(
+				subaccount,
+				market,
+				OrderType.TAKE_PROFIT_MARKET,
+				side === OrderSide.BUY ? OrderSide.SELL : OrderSide.BUY,
+				alertMessage.tp,
+				size,
+				this.generateRandomInt32(),
+				OrderTimeInForce.GTT,
+				120000,
+				OrderExecution.DEFAULT,
+				false,
+				true, // reduce only
+				alertMessage.tp // trigger price
+			);
+			console.log(`TP placé à ${alertMessage.tp}`);
 		}
+
+		// ✅ Ajout SL
+		if (alertMessage.sl) {
+			await client.placeOrder(
+				subaccount,
+				market,
+				OrderType.STOP_MARKET,
+				side === OrderSide.BUY ? OrderSide.SELL : OrderSide.BUY,
+				alertMessage.sl,
+				size,
+				this.generateRandomInt32(),
+				OrderTimeInForce.GTT,
+				120000,
+				OrderExecution.DEFAULT,
+				false,
+				true, // reduce only
+				alertMessage.sl // trigger price
+			);
+			console.log(`SL placé à ${alertMessage.sl}`);
+		}
+
+		return orderResult;
+	} catch (error) {
+		console.error(error);
+		throw new Error('Failed to place order with TP/SL');
 	}
+}
+
 
 	private buildCompositeClient = async () => {
 		const validatorConfig = new ValidatorConfig(
