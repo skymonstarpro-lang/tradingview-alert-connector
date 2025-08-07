@@ -72,8 +72,7 @@ export class DydxV4Client extends AbstractDexClient {
 			side: orderSide,
 			size: Number(orderSize),
 			price: Number(alertMessage.price),
-			tp,
-			sl
+			triggerPrice: Number(alertMessage.tp)
 		};
 		console.log('orderParams for dydx', orderParams);
 		return orderParams;
@@ -84,16 +83,14 @@ export class DydxV4Client extends AbstractDexClient {
   const orderSide = alertMessage.order.toUpperCase(); // BUY or SELL
   const orderSize = alertMessage.size;
   const price = alertMessage.price;
-  const tp = alertMessage.tp;
-  const sl = alertMessage.sl;
+  const triggerPrice = alertMessage.tp;
 
   console.log('orderParams for dydx', {
     market,
     side: orderSide,
     size: orderSize,
     price: price,
-	tp: tp,
-	sl: sl
+	triggerPrice: tp,
   });
 
   // 🟢 1. Ordre principal (ex: market BUY)
